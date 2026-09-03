@@ -1,0 +1,1 @@
+ALTER TABLE `paper_trades` ADD `model_version` text DEFAULT 'V1' NOT NULL;

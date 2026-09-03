@@ -1,0 +1,2 @@
+ALTER TABLE `shadow_observations` ADD `evaluation_version` text DEFAULT 'V1_SAMPLED_MARK' NOT NULL;--> statement-breakpoint
+ALTER TABLE `shadow_observations` ADD `outcome_source` text DEFAULT 'SAMPLED_MARK' NOT NULL;

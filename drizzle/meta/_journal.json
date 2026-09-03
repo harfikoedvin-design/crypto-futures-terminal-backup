@@ -1,0 +1,90 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1787491008198,
+      "tag": "0000_majestic_ricochet",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1787571083572,
+      "tag": "0001_dry_sue_storm",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1787784571841,
+      "tag": "0002_last_robin_chapel",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1787785724938,
+      "tag": "0003_regular_lady_deathstrike",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1787796387518,
+      "tag": "0004_bouncy_korvac",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1787839876527,
+      "tag": "0005_ambitious_luminals",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1787842005849,
+      "tag": "0006_redundant_caretaker",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1787847661065,
+      "tag": "0007_right_scarlet_witch",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1787960900588,
+      "tag": "0008_loving_sinister_six",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1787965195942,
+      "tag": "0009_flippant_meggan",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1788020572938,
+      "tag": "0010_long_mariko_yashida",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1788023343450,
+      "tag": "0011_curvy_spencer_smythe",
+      "breakpoints": true
+    }
+  ]
+}
