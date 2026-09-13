@@ -83,10 +83,14 @@ test("context stays useful without FRED credentials", async () => {
       return text(fredCsv(id), "application/csv");
     }
     if (url.startsWith("https://www.bls.gov/schedule/news_release/bls.ics")) {
+      // Fixture date stays in the future so the event lane never drops it as stale.
+      const future = new Date(Date.now() + 5 * 24 * 60_000);
+      const pad = (value) => String(value).padStart(2, "0");
+      const dtstart = `${future.getUTCFullYear()}${pad(future.getUTCMonth() + 1)}${pad(future.getUTCDate())}T083000`;
       return text([
         "BEGIN:VCALENDAR",
         "BEGIN:VEVENT",
-        "DTSTART;TZID=America/New_York:20260904T083000",
+        `DTSTART;TZID=America/New_York:${dtstart}`,
         "SUMMARY:Employment Situation for August 2026",
         "END:VEVENT",
         "END:VCALENDAR",

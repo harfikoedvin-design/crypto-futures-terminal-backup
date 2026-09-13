@@ -73,7 +73,7 @@ Pembagian timeframe:
 
 Tipe setup aktif saat ini:
 
-- `Breakout / retest`
+- `Breakout`
 - `Trend pullback`
 
 ### Komponen technical score saat ini
@@ -91,9 +91,8 @@ Tipe setup aktif saat ini:
 | Taker buy/sell searah | 4 |
 | OI 45 menit tidak turun | 4 |
 | Funding mendukung | 4 |
-| Poin dasar yang masih ada di kode | 5 |
 
-Score dibatasi maksimum 100. **Catatan audit penting:** masih terdapat `+5` poin dasar. Hasil riset sebelumnya justru menyarankan menghapus poin gratis/default; bagian ini harus menjadi objek evaluasi berikutnya.
+Score dibatasi maksimum 100. Setiap komponen hanya menyumbang poin bila buktinya hadir — tidak ada poin dasar/fallback (audit P0 menghapus `+5` unconditional serta fallback +4/+3/+1).
 
 ### Hard gate Trade Ready
 
@@ -261,21 +260,23 @@ Maintenance margin, liquidation fee, funding aktual, dan slippage belum dimodelk
 
 ### Aturan pembukaan
 
-- Ranking score minimal 70.
+- Technical score minimal 70. News/context hanya memengaruhi urutan ranking, tidak pernah membuka paper trade.
 - Gate momentum `score`, ADX, relative volume, dan OI dipakai sebagai bobot kualitas/moment, bukan empat veto terpisah untuk paper V3.
 - Gate keselamatan tetap wajib lolos: kesehatan data, arah dasar, alignment 15m, likuiditas, spread, funding ekstrem, lokasi, struktur, overextension, dan Risk Engine V3.
 - Maksimum satu posisi aktif untuk simbol yang sama.
 - Snapshot konteks News pada saat entry ikut disimpan.
 - Posisi lama V1/V2 tetap dipantau sebagai `LEGACY`, tetapi tidak dicampur ke statistik V3.
 
-Karena ambang pembukaan memakai ranking score, bukan technical score murni, adjustment News dapat menentukan apakah setup yang dekat ambang 70 dibuka sebagai paper trade. Hard gate lain tetap tidak dapat dilewati.
+Ambang pembukaan memakai technical score murni. Adjustment News (bounded ±3) hanya mengubah `rankingScore` untuk urutan tampilan; setup di bawah 70 teknikal tidak dibuka walau ranking terdongkrak berita. Hard gate lain tetap tidak dapat dilewati.
 
 ### Monitoring dan penutupan
 
-- Harga posisi aktif diperbarui setiap 30 detik selama terminal terbuka; bila gagal, retry 60 detik.
+- Harga posisi aktif diperbarui setiap 30 detik selama terminal terbuka; bila gagal, retry 60 detik. Feed harga hanya memperbarui observed high/low — tidak menutup posisi.
 - Full scan untuk kandidat baru berjalan setiap 15 menit selama terminal terbuka.
+- Satu-satunya jalur penutupan TP/SL adalah candle 15m yang sudah tutup (stop-first konservatif), sama dengan metodologi evaluasi shadow.
 - TP1 dihitung sebagai kemenangan; SL dihitung sebagai `−1R`.
 - Jika TP dan SL tersentuh dalam candle 15m yang sama, sistem mencatat SL terlebih dahulu secara konservatif.
+- Penutupan manual (`MANUAL CLOSE`) tercatat di histori dan saldo, tetapi dikeluarkan dari expectancy, profit factor, dan sampel promosi.
 - Riwayat menyimpan entry, exit, status, R, waktu buka/tutup, dan evidence snapshot.
 - Daftar posisi aktif ditampilkan delapan posisi per halaman dan detailnya dapat dibuka/tutup.
 
@@ -319,7 +320,7 @@ Karena itu, status terminal harus dibaca sebagai **Trade Ready untuk paper obser
 - Belum ada rule trading yang terbukti stabil secara out-of-sample dan live shadow.
 - Score belum dikalibrasi menjadi probabilitas kemenangan.
 - Bobot teknikal belum diturunkan dari hasil statistik paper journal.
-- Terdapat poin dasar `+5` yang perlu diaudit.
+- Poin default/fallback skor telah dihapus (audit P0); gate 75 kini murni bukti.
 - Forward Evidence Collector berjalan 24/7 melalui GitHub Actions setiap 15 menit. Tombol `COLLECT NOW` tetap dapat menjalankan satu cycle langsung dan mendeduplikasi candle yang sama.
 - Wallet accumulation/Arkham belum menjadi konfirmasi operasional.
 - Telegram alert aktif untuk Early Watch, Hot Volume, dan Momentum Breakout; snapshot chart dikirim pada perubahan state monitor.
@@ -333,7 +334,7 @@ Jangan mengubah bobot saat sampel sedang dikumpulkan. Untuk setiap periode audit
 
 1. Jumlah setup V2 yang resolved.
 2. Win rate, expectancy R, net R, dan profit factor.
-3. Hasil per tipe setup: Breakout/retest versus Trend pullback.
+3. Hasil per tipe setup: Breakout versus Trend pullback.
 4. Hasil LONG versus SHORT.
 5. Hasil per regime: trending, range, risk-on, risk-off.
 6. Perbandingan setup dengan news support/pressure/netral.

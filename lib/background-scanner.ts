@@ -249,7 +249,9 @@ function paperCandidates(results: Awaited<ReturnType<typeof scanMarket>>["result
         paperGateFailures: item.diagnostic.failedGates.filter((gate) => !weightedMomentumGates.has(gate)),
       }];
     })
-    .filter((item) => item.rankingScore >= PAPER_MIN_SCORE && item.paperGateFailures?.length === 0 && item.risk.gatePass)
+    // P0 audit: eligibility uses the pure technical score. rankingScore
+    // (technical + bounded news context) only affects display/sort order.
+    .filter((item) => item.technicalScore >= PAPER_MIN_SCORE && item.paperGateFailures?.length === 0 && item.risk.gatePass)
     .sort((left, right) => right.rankingScore - left.rankingScore)
     .filter((item, index, items) => items.findIndex((candidate) => candidate.symbol === item.symbol) === index);
 }
@@ -462,7 +464,8 @@ export async function runBackgroundScan(now = new Date()): Promise<BackgroundSca
           health = degradeScanDataHealth(health, "EVENT_BLACKOUT");
           candidates = [];
         } else {
-          candidates = candidates.filter((candidate) => candidate.rankingScore >= PAPER_MIN_SCORE);
+          // P0 audit: news context must not push a sub-threshold setup into paper.
+          candidates = candidates.filter((candidate) => candidate.technicalScore >= PAPER_MIN_SCORE);
         }
       } catch {
         health = degradeScanDataHealth(health, "INTEL_UNAVAILABLE");
