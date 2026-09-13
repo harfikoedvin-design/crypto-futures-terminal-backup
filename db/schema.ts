@@ -247,3 +247,38 @@ export const hotVolumeObservations = sqliteTable(
     index("hot_volume_observations_symbol_opened_idx").on(table.symbol, table.openedAt),
   ],
 );
+
+export const haxkaiShadowObservations = sqliteTable(
+  "haxkai_shadow_observations",
+  {
+    id: text("id").primaryKey(),
+    signalKey: text("signal_key").notNull(),
+    symbol: text("symbol").notNull(),
+    baseAsset: text("base_asset").notNull(),
+    direction: text("direction", { enum: ["LONG", "SHORT"] }).notNull(),
+    levelPrice: real("level_price").notNull(),
+    levelLabel: text("level_label").notNull(),
+    volumeRatio: real("volume_ratio").notNull(),
+    entryPrice: real("entry_price").notNull(),
+    stopLoss: real("stop_loss").notNull(),
+    takeProfit: real("take_profit").notNull(),
+    targetR: real("target_r").notNull(),
+    status: text("status", { enum: ["OPEN", "TP", "SL", "EXPIRED"] }).notNull().default("OPEN"),
+    outcomeR: real("outcome_r"),
+    exitPrice: real("exit_price"),
+    openedAt: text("opened_at").notNull(),
+    closedAt: text("closed_at"),
+    lastCheckedAt: text("last_checked_at").notNull(),
+    observedHigh: real("observed_high").notNull(),
+    observedLow: real("observed_low").notNull(),
+    sourceClosedAt: integer("source_closed_at").notNull(),
+    evidenceHash: text("evidence_hash").notNull(),
+    evidenceJson: text("evidence_json").notNull(),
+  },
+  (table) => [
+    uniqueIndex("haxkai_shadow_signal_key_unique").on(table.signalKey),
+    index("haxkai_shadow_status_opened_idx").on(table.status, table.openedAt),
+    index("haxkai_shadow_symbol_opened_idx").on(table.symbol, table.openedAt),
+    index("haxkai_shadow_direction_opened_idx").on(table.direction, table.openedAt),
+  ],
+);

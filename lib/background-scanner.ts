@@ -1,6 +1,7 @@
 import { loadIntelligence } from "@/lib/context";
 import { assessScanDataHealth, degradeScanDataHealth } from "@/lib/data-health";
 import { syncShadowEvaluation } from "@/lib/evaluation";
+import { syncHaxkaiShadow } from "@/lib/haxkai-shadow";
 import { syncExitManagement } from "@/lib/exit-management";
 import { loadHotVolumeReport } from "@/lib/hot-volume";
 import { syncHotVolumeEvaluation } from "@/lib/hot-volume-evaluation";
@@ -495,9 +496,11 @@ export async function runBackgroundScan(now = new Date()): Promise<BackgroundSca
     const paper = await getPaperJournal().catch(() => null);
     const shadow = scan ? await syncShadowEvaluation(scan.results, generatedAt).catch(() => null) : null;
     const exit = await syncExitManagement().catch(() => null);
+    const haxkai = scan ? await syncHaxkaiShadow(scan.universe.map((item) => item.symbol), generatedAt).catch(() => null) : null;
     if (!paper) warnings.push("PAPER_JOURNAL_UNAVAILABLE");
     if (!shadow) warnings.push("SHADOW_EVIDENCE_UNAVAILABLE");
     if (!exit) warnings.push("EXIT_LANE_FAILED");
+    if (!haxkai) warnings.push("HAXKAI_LANE_FAILED");
     let hotVolume: BackgroundScanReport["hotVolume"] = { state: "NOT_RUN", returned: 0, ready: 0, breakout: 0, breakoutReady: 0, pairedResolved: 0, verdict: "INSUFFICIENT DATA" };
     let hotState = "FAILED";
     let hotAlerted = 0;

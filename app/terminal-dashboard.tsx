@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { IntelligenceContext, NewsContextItem } from "@/lib/context";
+import type { HaxkaiShadowReport } from "@/lib/haxkai-shadow";
 import type { HotVolumeCandidate, HotVolumeReport, HotVolumeStatus } from "@/lib/hot-volume";
 import type { HotVolumeEvaluationReport } from "@/lib/hot-volume-evaluation";
 import type { AnalysisResult, Candidate, CandidateDiagnostic, EarlySignal, UniverseItem } from "@/lib/market";
@@ -141,6 +142,7 @@ type PaperJournal = {
     marginLossCaps: number;
     byModel: Array<{
       modelVersion: string; total: number; open: number; resolved: number; wins: number; losses: number;
+      manualClosed: number;
       winRate: number; realizedNetPnlUsd: number; expectancyUsd: number; profitFactor: number | null; marginLossCaps: number;
     }>;
   };
@@ -540,6 +542,7 @@ export default function Dashboard({ displayName, readOnlyViewer }: DashboardProp
   const [crossExchange, setCrossExchange] = useState<CrossExchangeSnapshot | null>(null);
   const [crossExchangeLoading, setCrossExchangeLoading] = useState(false);
   const [evaluation, setEvaluation] = useState<EvaluationReport | null>(null);
+  const [haxkai, setHaxkai] = useState<HaxkaiShadowReport | null>(null);
   const [telegramStatus, setTelegramStatus] = useState<TelegramCompanionStatus | null>(null);
   const [telegramTokenDraft, setTelegramTokenDraft] = useState("");
   const [telegramSetupBusy, setTelegramSetupBusy] = useState(false);
@@ -754,6 +757,11 @@ export default function Dashboard({ displayName, readOnlyViewer }: DashboardProp
   }, [evaluation]);
 
   useEffect(() => {
+    if (haxkai) return;
+    void jsonOrThrow<HaxkaiShadowReport>("/api/haxkai-shadow").then(setHaxkai).catch(() => null);
+  }, [haxkai]);
+
+  useEffect(() => {
     if (readOnlyViewer) {
       void jsonOrThrow<TelegramCompanionStatus>("/api/telegram/status").then(setTelegramStatus).catch(() => null);
       return;
@@ -824,14 +832,16 @@ export default function Dashboard({ displayName, readOnlyViewer }: DashboardProp
     try {
       const result = await jsonOrThrow<{ status: BackgroundScanStatus }>("/api/background/status", { method: "POST" });
       setCollectorStatus(result.status);
-      const [journal, evaluationReport, exitReport] = await Promise.all([
+      const [journal, evaluationReport, exitReport, haxkaiReport] = await Promise.all([
         jsonOrThrow<PaperJournal>("/api/paper-trades"),
         jsonOrThrow<EvaluationReport>("/api/evaluation"),
         jsonOrThrow<ExitShadowReport>("/api/exit-management"),
+        jsonOrThrow<HaxkaiShadowReport>("/api/haxkai-shadow").catch(() => null),
       ]);
       setPaperJournal(journal);
       setEvaluation(evaluationReport);
       setExitManagement(exitReport);
+      if (haxkaiReport) setHaxkai(haxkaiReport);
     } catch (collectorError) {
       setError(collectorError instanceof Error ? collectorError.message : "Collector gagal dengan aman.");
       void jsonOrThrow<BackgroundScanStatus>("/api/background/status").then(setCollectorStatus).catch(() => null);
@@ -1537,7 +1547,7 @@ export default function Dashboard({ displayName, readOnlyViewer }: DashboardProp
             <div><small>OPEN · V3</small><b>{paperJournal?.summary.open ?? 0}</b><span>Legacy terpisah: {paperJournal?.summary.legacyOpen ?? 0} open</span></div>
             <div><small>RESOLVED · V3</small><b>{paperJournal?.summary.resolved ?? 0}</b><span>TP + SL (MANUAL excluded)</span></div>
             <div><small>TP RATE · V3</small><b>{(paperJournal?.summary.wins ?? 0) + (paperJournal?.summary.losses ?? 0) ? `${paperJournal!.summary.winRate.toFixed(1)}%` : "—"}</b><span>{paperJournal?.summary.wins ?? 0} TP · {paperJournal?.summary.losses ?? 0} SL · {paperJournal?.summary.manualClosed ?? 0} manual</span></div>
-            <div><small>EXPECTANCY</small><b className={(paperJournal?.summary.expectancyR ?? 0) >= 0 ? "positive" : "negative"}>{paperJournal?.summary.resolved ? `${signed(paperJournal.summary.expectancyR)}R` : "—"}</b><span>rata-rata / trade</span></div>
+            <div><small>EXPECTANCY</small><b className={(paperJournal?.summary.expectancyR ?? 0) >= 0 ? "positive" : "negative"}>{paperJournal?.summary.resolved ? `${signed(paperJournal.summary.expectancyR)}R` : "—"}</b><span>rata-rata / decisive · MANUAL excluded</span></div>
             <div><small>NET RESULT</small><b className={(paperJournal?.summary.netR ?? 0) >= 0 ? "positive" : "negative"}>{paperJournal?.summary.resolved ? `${signed(paperJournal.summary.netR)}R` : "—"}</b><span>paper only</span></div>
           </div>
         </section>
@@ -1574,7 +1584,7 @@ export default function Dashboard({ displayName, readOnlyViewer }: DashboardProp
           {!!paperJournal?.account.byModel.length && <div className="paper-model-ledger">
             <div className="paper-model-head"><span>Model</span><span>Total</span><span>Resolved</span><span>Win rate</span><span>Net P&amp;L</span><span>Expectancy</span></div>
             {paperJournal.account.byModel.map((model) => <div className="paper-model-row" key={model.modelVersion}>
-              <span><b>{model.modelVersion}</b><small>{model.open} open · {model.marginLossCaps} margin cap</small></span>
+              <span><b>{model.modelVersion}</b><small>{model.open} open · {model.manualClosed} manual · {model.marginLossCaps} margin cap</small></span>
               <span>{model.total}</span><span>{model.resolved}</span><span>{model.resolved ? `${model.winRate.toFixed(1)}%` : "—"}</span>
               <span className={model.realizedNetPnlUsd >= 0 ? "positive" : "negative"}>{usd(model.realizedNetPnlUsd, true)}</span>
               <span className={model.expectancyUsd >= 0 ? "positive" : "negative"}>{model.resolved ? usd(model.expectancyUsd, true) : "—"}</span>
@@ -1792,6 +1802,28 @@ export default function Dashboard({ displayName, readOnlyViewer }: DashboardProp
           <div className="evaluation-progress" aria-label="Kemajuan sampel shadow resolved">
             <span style={{ width: `${Math.min(100, ((evaluation?.shadow.resolved ?? 0) / (evaluation?.targetResolved ?? 100)) * 100)}%` }} />
           </div>
+        </section>
+
+        <section className="panel evaluation-hero">
+          <div className="panel-heading">
+            <div><p className="eyebrow">HAXKAI SHADOW V1</p><h2>Daily-Close Confirmation</h2></div>
+            <span className={`evaluation-verdict ${haxkai?.verdict.toLowerCase().replaceAll(" ", "-") ?? "loading"}`}>{haxkai?.verdict ?? "LOADING"}</span>
+          </div>
+          <div className="evaluation-safety">
+            <strong>DAILY CLOSE ± 2x VOLUME · SHADOW ONLY</strong>
+            <span>{haxkai?.verdictReason ?? "Menyiapkan cohort daily-confirmation."} Tidak membuka paper, tidak mengubah skor.</span>
+          </div>
+          <div className="evaluation-stat-grid">
+            <div><small>SHADOW RESOLVED</small><b>{haxkai?.all.resolved ?? 0}<i>/{haxkai?.minimumResolved ?? 30}</i></b><span>{haxkai?.all.open ?? 0} observasi aktif</span></div>
+            <div><small>EXPECTANCY</small><b className={(haxkai?.all.expectancyR ?? 0) >= 0 ? "positive" : "negative"}>{haxkai?.all.resolved ? `${signed(haxkai.all.expectancyR)}R` : "—"}</b><span>target 2R · stop-first</span></div>
+            <div><small>PROFIT FACTOR</small><b>{haxkai?.all.resolved ? haxkai.all.profitFactor === null ? "∞" : haxkai.all.profitFactor.toFixed(2) : "—"}</b><span>gate KEEP ≥ 1,20</span></div>
+            <div><small>MAX DRAWDOWN</small><b className="negative">{haxkai?.all.resolved ? `${haxkai.all.maxDrawdownR.toFixed(1)}R` : "—"}</b><span>gate KEEP ≤ 10R</span></div>
+            <div><small>LONG vs SHORT</small><b>{haxkai ? `${haxkai.byDirection.find((item) => item.label === "LONG")?.resolved ?? 0} / ${haxkai.byDirection.find((item) => item.label === "SHORT")?.resolved ?? 0}` : "—"}</b><span>resolved per arah</span></div>
+          </div>
+          <div className="evaluation-progress" aria-label="Kemajuan sampel haxkai shadow resolved">
+            <span style={{ width: `${Math.min(100, ((haxkai?.all.resolved ?? 0) / (haxkai?.minimumResolved ?? 30)) * 100)}%` }} />
+          </div>
+          <p className="panel-note">Hipotesis gaya-HaxKai: daily close menembus prior-day high/low dengan volume ≥2x rata-rata 20 hari. Entry = close harian, stop = ekstrem harian, target 2R riset. Settlement closed-15m stop-first 24 jam — sebanding dengan baseline V2. Verdict hanya laporan; aktivasi butuh review manusia.</p>
         </section>
 
         <section className="evaluation-grid">
