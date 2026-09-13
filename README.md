@@ -390,6 +390,13 @@ Bagian berikut mendokumentasikan eksperimen shadow yang tidak mengganti hasil pa
 - Terminal menampilkan jumlah bias LONG, bias SHORT, WAIT, dan kandidat yang lolos seluruh gate shadow.
 - Hasil ini tidak membuka, menutup, atau mengubah paper trade. Aktivasi hanya dapat dipertimbangkan setelah sampel shadow cukup dan hasil LONG/SHORT diaudit terpisah.
 
+### HaxKai Shadow — daily-confirmation cohort (implemented, shadow-only)
+
+- Hipotesis gaya-HaxKai yang dikodekan sebagai observasi: daily close menembus prior-day high/low dengan volume harian ≥2x rata-rata 20 hari.
+- Entry = close harian pemicu, stop = ekstrem harian pemicu, target riset 2R (bukan rule paper 3,2R). Settlement memakai metodologi yang sama dengan evaluasi V2: closed 15m, stop-first konservatif, horizon 24 jam — agar sebanding dengan baseline.
+- Cohort `haxkai-shadow-v1` tidak membuka paper trade, tidak mengubah skor, dan tidak memberi saran eksekusi. Verdict (`INSUFFICIENT DATA` sampai 30 resolved; `KEEP` butuh expectancy positif + PF ≥1,2) hanya laporan — aktivasi butuh review manusia.
+- Panel Eval menampilkan progres, expectancy, profit factor, drawdown, dan split LONG/SHORT. Migrasi D1: `drizzle/0012_supreme_songbird.sql` (terapkan ke D1 lokal + production sebelum kolektor berjalan).
+
 ### Intel & Evidence V2 Shadow
 
 - Kolektor news dan market context tetap deterministik: ambil data, normalisasi, deduplikasi, cek kelengkapan, lalu ukur freshness tanpa LLM.
