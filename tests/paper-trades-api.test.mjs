@@ -17,10 +17,11 @@ class FakeD1 {
         }
         if (sql.includes("AS total") && sql.includes("expectancy_r")) {
           const v3 = rows.filter((row) => row.model_version === "V3");
-          const history = v3.filter((row) => row.status !== "OPEN");
+          // Mirrors production SQL: decisive (TP/SL) outcomes only; MANUAL excluded.
+          const history = v3.filter((row) => row.status === "TP" || row.status === "SL");
           const wins = history.filter((row) => row.status === "TP").length;
           const netR = history.reduce((sum, row) => sum + Number(row.outcome_r ?? 0), 0);
-          const allHistory = rows.filter((row) => row.status !== "OPEN");
+          const allHistory = rows.filter((row) => row.status === "TP" || row.status === "SL");
           const stopped = rows.filter((row) => row.status === "SL");
           const stoppedMfeR = stopped.map((row) => {
             const entry = Number(row.entry_price);
@@ -36,7 +37,7 @@ class FakeD1 {
             resolved: history.length,
             wins,
             losses: history.filter((row) => row.status === "SL").length,
-            manual_closed: history.filter((row) => row.status === "MANUAL").length,
+            manual_closed: v3.filter((row) => row.status === "MANUAL").length,
             net_r: netR,
             expectancy_r: history.length ? netR / history.length : 0,
             legacy: rows.filter((row) => row.model_version !== "V3").length,
@@ -57,6 +58,18 @@ class FakeD1 {
       },
       async run() {
         if (sql.startsWith("UPDATE paper_trades")) {
+          // Extremes-only sync from the live price feed (no TP/SL resolution).
+          if (sql.includes("observed_high") && !sql.includes("SET status")) {
+            const [lastCheckedAt, observedHigh, observedLow, evidenceJson, id] = values;
+            const row = rows.find((item) => item.id === id);
+            if (row?.status === "OPEN") {
+              row.last_checked_at = lastCheckedAt;
+              row.observed_high = observedHigh;
+              row.observed_low = observedLow;
+              row.evidence_json = evidenceJson;
+            }
+            return { success: true };
+          }
           if (sql.includes("SET evidence_json = ?")) {
             const [evidenceJson, id] = values;
             const row = rows.find((item) => item.id === id);
@@ -217,7 +230,7 @@ test("paper journal persists a candidate and resolves TP from closed candles", a
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          candidates: [candidate, { ...candidate, symbol: "ETHUSDT", baseAsset: "ETH", rankingScore: 69 }],
+          candidates: [candidate, { ...candidate, symbol: "ETHUSDT", baseAsset: "ETH", rankingScore: 69, technicalScore: 69 }],
           generatedAt,
           dataHealth: healthyData(generatedAt),
         }),
@@ -570,7 +583,7 @@ test("Risk Engine V3 statistics exclude legacy V1/V2 outcomes", async () => {
   delete globalThis.__PAPER_D1_TEST_BINDING__;
 });
 
-test("live paper feed moves a filled target from running to result", async () => {
+test("live paper feed only refreshes extremes and never resolves TP/SL from ticks", async () => {
   const originalFetch = globalThis.fetch;
   const originalRelayUrl = process.env.BINANCE_RELAY_URL;
   const originalRelayToken = process.env.BINANCE_RELAY_TOKEN;
@@ -601,10 +614,13 @@ test("live paper feed moves a filled target from running to result", async () =>
     assert.equal(response.status, 200);
     const body = await response.json();
     assert.equal(body.prices.BTCUSDT, 106.5);
-    assert.equal(body.journal.summary.open, 0);
-    assert.equal(body.journal.summary.wins, 1);
-    assert.equal(body.journal.openTrades.length, 0);
-    assert.equal(body.journal.history[0].status, "TP");
+    // Single settlement path: TP/SL resolve on closed 15m candles only.
+    assert.equal(body.journal.summary.open, 1);
+    assert.equal(body.journal.summary.wins, 0);
+    assert.equal(body.journal.openTrades.length, 1);
+    assert.equal(body.journal.openTrades[0].status, "OPEN");
+    assert.equal(body.journal.openTrades[0].observedHigh, 106.5);
+    assert.equal(body.journal.history.length, 0);
   } finally {
     globalThis.fetch = originalFetch;
     delete globalThis.__PAPER_D1_TEST_BINDING__;
@@ -615,7 +631,7 @@ test("live paper feed moves a filled target from running to result", async () =>
   }
 });
 
-test("live paper feed removes a stopped trade from running and moves it to history", async () => {
+test("live paper feed never stops a trade from a tick below the stop", async () => {
   const originalFetch = globalThis.fetch;
   const originalRelayUrl = process.env.BINANCE_RELAY_URL;
   const originalRelayToken = process.env.BINANCE_RELAY_TOKEN;
@@ -645,11 +661,13 @@ test("live paper feed removes a stopped trade from running and moves it to histo
     );
     assert.equal(response.status, 200);
     const body = await response.json();
-    assert.equal(body.journal.summary.open, 0);
-    assert.equal(body.journal.summary.losses, 1);
-    assert.equal(body.journal.openTrades.length, 0);
-    assert.equal(body.journal.history[0].status, "SL");
-    assert.equal(body.journal.history[0].outcomeR, -1);
+    assert.equal(body.journal.summary.open, 1);
+    assert.equal(body.journal.summary.losses, 0);
+    assert.equal(body.journal.openTrades.length, 1);
+    assert.equal(body.journal.openTrades[0].status, "OPEN");
+    assert.equal(body.journal.openTrades[0].observedLow, 97.5);
+    assert.equal(body.journal.openTrades[0].outcomeR, null);
+    assert.equal(body.journal.history.length, 0);
   } finally {
     globalThis.fetch = originalFetch;
     delete globalThis.__PAPER_D1_TEST_BINDING__;

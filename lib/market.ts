@@ -995,7 +995,7 @@ function locationContext(
   }
   const expectedBreakout = long ? "UP" : "DOWN";
   if (structure.breakout === expectedBreakout) {
-    locations.unshift(long ? "breakout/retest" : "breakdown/retest");
+    locations.unshift(long ? "breakout" : "breakdown");
     reasons.unshift(`${long ? "Breakout" : "Breakdown"} struktur terkonfirmasi`);
   }
   if (line.actionable) {
@@ -1303,21 +1303,21 @@ export async function analyzeSymbol(
   if ((long && structure.trend === "BULLISH") || (short && structure.trend === "BEARISH")) score += 12;
   else if (structure.trend === "RANGE") score += 5;
   if ((long && structure.breakout === "UP") || (short && structure.breakout === "DOWN")) score += 8;
-  else score += 4;
   if (primary.relativeVolume >= 0.75) score += 9;
   const recentAtr = atrSeries(primaryCandles).slice(-20);
   const atrMedian = [...recentAtr].sort((a, b) => a - b)[Math.floor(recentAtr.length / 2)];
-  score += primary.atr > atrMedian ? 6 : 3;
+  // No fallback points: a component only scores when its evidence is present.
+  // (P0 audit: removed +4 no-breakout, +3 ATR-median, +1 taker, +5 unconditional defaults.)
+  if (primary.atr > atrMedian) score += 6;
   const takerAligned =
     takerBuySellRatio !== null &&
     ((long && takerBuySellRatio >= 1) || (short && takerBuySellRatio <= 1));
-  score += takerAligned ? 4 : 1;
+  if (takerAligned) score += 4;
   if (oiChangePercent >= 0) score += 4;
   const fundingSupports =
     Math.abs(fundingRate) <= SCREENER_RULES.maximumAbsFunding &&
     ((long && fundingRate <= 0.0007) || (short && fundingRate >= -0.0007));
   if (fundingSupports) score += 4;
-  score += 5;
   score = Math.min(100, score);
 
   const diagnosticBase = {
@@ -1382,7 +1382,7 @@ export async function analyzeSymbol(
     symbol,
     baseAsset: symbol.replace(/USDT$/, ""),
     direction,
-    setupType: structure.breakout === (long ? "UP" : "DOWN") ? "Breakout / retest" : "Trend pullback",
+    setupType: structure.breakout === (long ? "UP" : "DOWN") ? "Breakout" : "Trend pullback",
     technicalScore: score,
     rankingScore: score,
     price,

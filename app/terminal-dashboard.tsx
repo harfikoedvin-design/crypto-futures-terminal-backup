@@ -1535,7 +1535,7 @@ export default function Dashboard({ displayName, readOnlyViewer }: DashboardProp
           </div>
           <div className="paper-stat-grid">
             <div><small>OPEN · V3</small><b>{paperJournal?.summary.open ?? 0}</b><span>Legacy terpisah: {paperJournal?.summary.legacyOpen ?? 0} open</span></div>
-            <div><small>RESOLVED · V3</small><b>{paperJournal?.summary.resolved ?? 0}</b><span>TP + SL + MANUAL</span></div>
+            <div><small>RESOLVED · V3</small><b>{paperJournal?.summary.resolved ?? 0}</b><span>TP + SL (MANUAL excluded)</span></div>
             <div><small>TP RATE · V3</small><b>{(paperJournal?.summary.wins ?? 0) + (paperJournal?.summary.losses ?? 0) ? `${paperJournal!.summary.winRate.toFixed(1)}%` : "—"}</b><span>{paperJournal?.summary.wins ?? 0} TP · {paperJournal?.summary.losses ?? 0} SL · {paperJournal?.summary.manualClosed ?? 0} manual</span></div>
             <div><small>EXPECTANCY</small><b className={(paperJournal?.summary.expectancyR ?? 0) >= 0 ? "positive" : "negative"}>{paperJournal?.summary.resolved ? `${signed(paperJournal.summary.expectancyR)}R` : "—"}</b><span>rata-rata / trade</span></div>
             <div><small>NET RESULT</small><b className={(paperJournal?.summary.netR ?? 0) >= 0 ? "positive" : "negative"}>{paperJournal?.summary.resolved ? `${signed(paperJournal.summary.netR)}R` : "—"}</b><span>paper only</span></div>

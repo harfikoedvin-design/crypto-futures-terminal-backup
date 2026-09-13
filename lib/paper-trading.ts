@@ -90,6 +90,7 @@ export type PaperModelPerformance = {
   resolved: number;
   wins: number;
   losses: number;
+  manualClosed: number;
   winRate: number;
   realizedNetPnlUsd: number;
   expectancyUsd: number;
@@ -210,6 +211,7 @@ export type ActionablePaperOpenResult = {
     | "PORTFOLIO_RISK_LIMIT"
     | "DIRECTION_RISK_LIMIT"
     | "RISK_GATE"
+    | "SCORE_GATE"
     | "MARGIN_LIMIT"
     | "RACE_LOST";
   trade: PaperTradeRecord | null;
@@ -478,25 +480,32 @@ function rowToTrade(row: D1Row): PaperTradeRecord {
 }
 
 function modelPerformance(modelVersion: string, trades: PaperTradeRecord[]): PaperModelPerformance {
-  const resolved = trades.filter((trade) => trade.status !== "OPEN");
-  const wins = resolved.filter((trade) => trade.status === "TP").length;
-  const losses = resolved.filter((trade) => trade.status === "SL").length;
-  const decisive = wins + losses;
-  const gains = resolved.reduce((sum, trade) => sum + Math.max(0, trade.accounting.netPnlUsd), 0);
-  const lossesUsd = Math.abs(resolved.reduce((sum, trade) => sum + Math.min(0, trade.accounting.netPnlUsd), 0));
-  const net = resolved.reduce((sum, trade) => sum + trade.accounting.netPnlUsd, 0);
+  // P1 audit: expectancy and profit factor measure the rule's decisive edge
+  // (TP/SL only). MANUAL closes stay in realized cash flows but never in the
+  // rule statistics.
+  const decisive = trades.filter((trade) => trade.status === "TP" || trade.status === "SL");
+  const manualClosed = trades.filter((trade) => trade.status === "MANUAL").length;
+  const wins = decisive.filter((trade) => trade.status === "TP").length;
+  const losses = decisive.filter((trade) => trade.status === "SL").length;
+  const gains = decisive.reduce((sum, trade) => sum + Math.max(0, trade.accounting.netPnlUsd), 0);
+  const lossesUsd = Math.abs(decisive.reduce((sum, trade) => sum + Math.min(0, trade.accounting.netPnlUsd), 0));
+  const decisiveNet = decisive.reduce((sum, trade) => sum + trade.accounting.netPnlUsd, 0);
+  const net = trades
+    .filter((trade) => trade.status !== "OPEN")
+    .reduce((sum, trade) => sum + trade.accounting.netPnlUsd, 0);
   return {
     modelVersion,
     total: trades.length,
     open: trades.filter((trade) => trade.status === "OPEN").length,
-    resolved: resolved.length,
+    resolved: decisive.length,
     wins,
     losses,
-    winRate: decisive ? (wins / decisive) * 100 : 0,
+    manualClosed,
+    winRate: decisive.length ? (wins / decisive.length) * 100 : 0,
     realizedNetPnlUsd: net,
-    expectancyUsd: resolved.length ? net / resolved.length : 0,
+    expectancyUsd: decisive.length ? decisiveNet / decisive.length : 0,
     profitFactor: lossesUsd > 0 ? gains / lossesUsd : gains > 0 ? null : 0,
-    marginLossCaps: resolved.filter((trade) => trade.accounting.marginLossCapped).length,
+    marginLossCaps: decisive.filter((trade) => trade.accounting.marginLossCapped).length,
   };
 }
 
@@ -504,15 +513,19 @@ function buildPaperAccount(trades: PaperTradeRecord[]): PaperAccountSummary {
   const resolved = trades
     .filter((trade) => trade.status !== "OPEN")
     .sort((left, right) => Date.parse(left.closedAt ?? "") - Date.parse(right.closedAt ?? ""));
+  // P1 audit: expectancy/profit factor use decisive (TP/SL) outcomes only.
+  // Balance, drawdown and fees keep every realized cash flow, including MANUAL.
+  const decisive = resolved.filter((trade) => trade.status === "TP" || trade.status === "SL");
   const realizedGrossPnlUsd = resolved.reduce((sum, trade) => sum + trade.accounting.grossPnlUsd, 0);
   const estimatedFeesUsd = resolved.reduce((sum, trade) => sum + trade.accounting.estimatedRoundTripFeesUsd, 0);
   const realizedNetPnlUsd = resolved.reduce((sum, trade) => sum + trade.accounting.netPnlUsd, 0);
+  const decisiveNetPnlUsd = decisive.reduce((sum, trade) => sum + trade.accounting.netPnlUsd, 0);
   const balanceUsd = PAPER_INITIAL_CAPITAL_USD + realizedNetPnlUsd;
   const openMarginUsd = trades
     .filter((trade) => trade.status === "OPEN")
     .reduce((sum, trade) => sum + trade.accounting.marginUsd, 0);
-  const gains = resolved.reduce((sum, trade) => sum + Math.max(0, trade.accounting.netPnlUsd), 0);
-  const lossesUsd = Math.abs(resolved.reduce((sum, trade) => sum + Math.min(0, trade.accounting.netPnlUsd), 0));
+  const gains = decisive.reduce((sum, trade) => sum + Math.max(0, trade.accounting.netPnlUsd), 0);
+  const lossesUsd = Math.abs(decisive.reduce((sum, trade) => sum + Math.min(0, trade.accounting.netPnlUsd), 0));
   let runningBalance = PAPER_INITIAL_CAPITAL_USD;
   let peakBalance = runningBalance;
   let maxDrawdownUsd = 0;
@@ -549,25 +562,28 @@ function buildPaperAccount(trades: PaperTradeRecord[]): PaperAccountSummary {
     maxDrawdownUsd,
     maxDrawdownPct: (maxDrawdownUsd / PAPER_INITIAL_CAPITAL_USD) * 100,
     profitFactor: lossesUsd > 0 ? gains / lossesUsd : gains > 0 ? null : 0,
-    expectancyUsd: resolved.length ? realizedNetPnlUsd / resolved.length : 0,
+    expectancyUsd: decisive.length ? decisiveNetPnlUsd / decisive.length : 0,
     marginLossCaps: resolved.filter((trade) => trade.accounting.marginLossCapped).length,
     byModel: versions.map((version) => modelPerformance(version, trades.filter((trade) => trade.modelVersion === version))),
   };
 }
 
 function evaluatePaperSystem(trades: PaperTradeRecord[], account: PaperAccountSummary): PaperSystemEvaluation {
-  const resolved = trades.filter((trade) => trade.status !== "OPEN");
-  const wins = resolved.filter((trade) => trade.status === "TP").length;
-  const activeResolved = resolved.filter((trade) => trade.modelVersion === RISK_ENGINE_VERSION).length;
+  // P1 audit: verdicts count decisive (TP/SL) outcomes. MANUAL closes are
+  // reported separately and never inflate win rate or the promotion sample.
+  const decisive = trades.filter((trade) => trade.status === "TP" || trade.status === "SL");
+  const manualClosed = trades.filter((trade) => trade.status === "MANUAL").length;
+  const wins = decisive.filter((trade) => trade.status === "TP").length;
+  const activeResolved = decisive.filter((trade) => trade.modelVersion === RISK_ENGINE_VERSION).length;
   const directionCounts = new Map<string, number>();
   for (const trade of trades) directionCounts.set(trade.direction, (directionCounts.get(trade.direction) ?? 0) + 1);
-  const verdict = resolved.length === 0
+  const verdict = decisive.length === 0
     ? "INSUFFICIENT_DATA"
-    : resolved.length >= 10 && account.realizedNetPnlUsd < 0
+    : decisive.length >= 10 && account.realizedNetPnlUsd < 0
       ? "UNDERPERFORMING"
       : "OBSERVE";
   const reasons = [
-    `${resolved.length} resolved: ${wins} TP dan ${resolved.length - wins} SL (${resolved.length ? ((wins / resolved.length) * 100).toFixed(1) : "0.0"}% win rate).`,
+    `${decisive.length} decisive: ${wins} TP dan ${decisive.length - wins} SL (${decisive.length ? ((wins / decisive.length) * 100).toFixed(1) : "0.0"}% win rate)${manualClosed ? ` · ${manualClosed} MANUAL excluded` : ""}.`,
     `Realized net ${account.realizedNetPnlUsd >= 0 ? "+" : "−"}$${Math.abs(account.realizedNetPnlUsd).toFixed(2)} dari modal awal $${PAPER_INITIAL_CAPITAL_USD.toFixed(0)}.`,
   ];
   if (directionCounts.size === 1) {
@@ -661,8 +677,10 @@ function validCandidate(value: unknown): value is Candidate {
     /^[A-Z0-9]{2,20}USDT$/.test(item.symbol) &&
     (item.direction === "LONG" || item.direction === "SHORT") &&
     typeof item.setupType === "string" &&
-    Number.isFinite(item.rankingScore) &&
-    Number(item.rankingScore) >= PAPER_MIN_SCORE &&
+    // P0 audit: eligibility uses the pure technical score. rankingScore
+    // (technical + bounded news context) is stored for audit but never gates entry.
+    Number.isFinite(item.technicalScore) &&
+    Number(item.technicalScore) >= PAPER_MIN_SCORE &&
     item.risk?.version === RISK_ENGINE_VERSION &&
     item.risk.gatePass === true &&
     Array.isArray(item.risk.gateFailures) &&
@@ -760,6 +778,15 @@ export async function openActionablePaperTrade(input: ActionablePaperInput): Pro
     return trade.status === "OPEN"
       ? { active: true, created: false, reason: "EXISTING_SIGNAL", trade }
       : { active: false, created: false, reason: "DUPLICATE_SIGNAL", trade: null };
+  }
+
+  // P0 audit: actionable/Telegram entries use the same pure-technical gate as
+  // the scanner. rankingScore (technical + news context) never opens paper.
+  const entryTechnicalScore = Number.isFinite(input.technicalScore)
+    ? Number(input.technicalScore)
+    : Number(input.rankingScore);
+  if (!(entryTechnicalScore >= PAPER_MIN_SCORE)) {
+    return { active: false, created: false, reason: "SCORE_GATE", trade: null };
   }
 
   const openResult = await db.prepare("SELECT * FROM paper_trades WHERE status = 'OPEN' ORDER BY opened_at ASC").all<D1Row>();
@@ -1077,46 +1104,37 @@ export async function syncPaperTrades(rawCandidates: unknown[], generatedAt: str
 }
 
 export async function settlePaperTrades(prices: Record<string, number>): Promise<PaperJournal> {
+  // P1 audit: single settlement path. Live ticks only refresh observed
+  // extremes and migrate legacy evidence — they NEVER resolve TP/SL.
+  // Resolution happens exclusively on closed 15m candles via monitorOpenTrade
+  // (stop-first, conservative), keeping paper outcomes comparable with the
+  // shadow evaluation methodology.
   const trades = await readOpenTrades();
   const db = await database();
-  const closedAt = new Date().toISOString();
+  const checkedAt = new Date().toISOString();
 
   for (const trade of trades) {
     const livePrice = numeric(prices[trade.symbol]);
     if (livePrice <= 0) continue;
     const openEvidence = await ensureOpenEvidence(trade);
-    const long = trade.direction === "LONG";
-    const stopHit = long ? livePrice <= trade.stopLoss : livePrice >= trade.stopLoss;
-    const targetHit = long ? livePrice >= trade.takeProfit : livePrice <= trade.takeProfit;
-    if (!stopHit && !targetHit) {
-      if (trade.evidence.schemaVersion !== PAPER_EVIDENCE_SCHEMA_VERSION) {
-        await db.prepare(
-          "UPDATE paper_trades SET evidence_json = ? WHERE id = ? AND status = 'OPEN'",
-        ).bind(JSON.stringify(openEvidence), trade.id).run();
-      }
+    const observedHigh = Math.max(trade.observedHigh, livePrice);
+    const observedLow = Math.min(trade.observedLow, livePrice);
+    if (
+      observedHigh === trade.observedHigh &&
+      observedLow === trade.observedLow &&
+      trade.evidence.schemaVersion === PAPER_EVIDENCE_SCHEMA_VERSION
+    ) {
       continue;
     }
-
-    const status: PaperTradeStatus = stopHit ? "SL" : "TP";
-    const exitPrice = stopHit ? trade.stopLoss : trade.takeProfit;
-    const risk = Math.abs(trade.entryPrice - trade.stopLoss);
-    const outcomeR = status === "SL"
-      ? -1
-      : risk > 0 ? Math.abs(trade.takeProfit - trade.entryPrice) / risk : 0;
-    const evidenceJson = await closeEvidence(trade, status, exitPrice, outcomeR, closedAt, Math.max(trade.observedHigh, livePrice), Math.min(trade.observedLow, livePrice));
     await db.prepare(
       `UPDATE paper_trades
-       SET status = ?, exit_price = ?, outcome_r = ?, closed_at = ?, last_checked_at = ?, observed_high = ?, observed_low = ?, evidence_json = ?
+       SET last_checked_at = ?, observed_high = ?, observed_low = ?, evidence_json = ?
        WHERE id = ? AND status = 'OPEN'`,
     ).bind(
-      status,
-      exitPrice,
-      outcomeR,
-      closedAt,
-      closedAt,
-      Math.max(trade.observedHigh, livePrice),
-      Math.min(trade.observedLow, livePrice),
-      evidenceJson,
+      checkedAt,
+      observedHigh,
+      observedLow,
+      JSON.stringify(openEvidence),
       trade.id,
     ).run();
   }
@@ -1162,21 +1180,21 @@ export async function getPaperJournal(limit = 100): Promise<PaperJournal> {
       `SELECT
         SUM(CASE WHEN model_version = '${RISK_ENGINE_VERSION}' THEN 1 ELSE 0 END) AS total,
         SUM(CASE WHEN model_version = '${RISK_ENGINE_VERSION}' AND status = 'OPEN' THEN 1 ELSE 0 END) AS open_count,
-        SUM(CASE WHEN model_version = '${RISK_ENGINE_VERSION}' AND status != 'OPEN' THEN 1 ELSE 0 END) AS resolved,
+        SUM(CASE WHEN model_version = '${RISK_ENGINE_VERSION}' AND status IN ('TP', 'SL') THEN 1 ELSE 0 END) AS resolved,
         SUM(CASE WHEN model_version = '${RISK_ENGINE_VERSION}' AND status = 'TP' THEN 1 ELSE 0 END) AS wins,
         SUM(CASE WHEN model_version = '${RISK_ENGINE_VERSION}' AND status = 'SL' THEN 1 ELSE 0 END) AS losses,
         SUM(CASE WHEN model_version = '${RISK_ENGINE_VERSION}' AND status = 'MANUAL' THEN 1 ELSE 0 END) AS manual_closed,
-        COALESCE(SUM(CASE WHEN model_version = '${RISK_ENGINE_VERSION}' AND status != 'OPEN' THEN outcome_r ELSE 0 END), 0) AS net_r,
-        COALESCE(AVG(CASE WHEN model_version = '${RISK_ENGINE_VERSION}' AND status != 'OPEN' THEN outcome_r END), 0) AS expectancy_r,
+        COALESCE(SUM(CASE WHEN model_version = '${RISK_ENGINE_VERSION}' AND status IN ('TP', 'SL') THEN outcome_r ELSE 0 END), 0) AS net_r,
+        COALESCE(AVG(CASE WHEN model_version = '${RISK_ENGINE_VERSION}' AND status IN ('TP', 'SL') THEN outcome_r END), 0) AS expectancy_r,
         SUM(CASE WHEN model_version != '${RISK_ENGINE_VERSION}' THEN 1 ELSE 0 END) AS legacy,
         SUM(CASE WHEN model_version != '${RISK_ENGINE_VERSION}' AND status = 'OPEN' THEN 1 ELSE 0 END) AS legacy_open,
         COUNT(*) AS all_total,
         SUM(CASE WHEN status = 'OPEN' THEN 1 ELSE 0 END) AS all_open,
-        SUM(CASE WHEN status != 'OPEN' THEN 1 ELSE 0 END) AS all_resolved,
+        SUM(CASE WHEN status IN ('TP', 'SL') THEN 1 ELSE 0 END) AS all_resolved,
         SUM(CASE WHEN status = 'TP' THEN 1 ELSE 0 END) AS all_wins,
         SUM(CASE WHEN status = 'SL' THEN 1 ELSE 0 END) AS all_losses,
         SUM(CASE WHEN status = 'MANUAL' THEN 1 ELSE 0 END) AS all_manual_closed,
-        COALESCE(SUM(CASE WHEN status != 'OPEN' THEN outcome_r ELSE 0 END), 0) AS all_net_r,
+        COALESCE(SUM(CASE WHEN status IN ('TP', 'SL') THEN outcome_r ELSE 0 END), 0) AS all_net_r,
         SUM(CASE WHEN status = 'SL' AND ABS(entry_price - stop_loss) > 0 AND
           (CASE WHEN direction = 'LONG' THEN observed_high - entry_price ELSE entry_price - observed_low END) >= 0.5 * ABS(entry_price - stop_loss)
           THEN 1 ELSE 0 END) AS sl_reached_half_r,

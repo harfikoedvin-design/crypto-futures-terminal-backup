@@ -391,13 +391,14 @@ function currentCoreSignal(context) {
   score += 6;
   if ((long && structure.trend === "BULLISH") || (!long && structure.trend === "BEARISH")) score += 12;
   else if (structure.trend === "RANGE") score += 5;
-  score += structure.breakout === (long ? "UP" : "DOWN") ? 8 : 4;
+  // P0 audit mirror of lib/market.ts: no fallback or unconditional points.
+  // A component only scores when its evidence is present.
+  if (structure.breakout === (long ? "UP" : "DOWN")) score += 8;
   score += 9;
   const atrMedian = median(primarySeries.slice(Math.max(0, primaryIndex - 19), primaryIndex + 1).map((item) => item.atr));
-  score += primary.atr > atrMedian ? 6 : 3;
-  // Mirrors the common neutral live state: taker fallback +1, non-negative OI +4,
-  // neutral funding +4, and the current unconditional +5.
-  score += 1 + 4 + 4 + 5;
+  if (primary.atr > atrMedian) score += 6;
+  // Historical OI/taker/funding are not fabricated, so no neutral-state
+  // equivalents are granted here either.
   if (score < 75) return null;
 
   const atr = primary.atr;
@@ -827,20 +828,17 @@ function summarize(trades) {
 
 function integrityAudit() {
   return {
-    maximumCurrentScore: 97,
-    defaultPoints: 13,
+    maximumCurrentScore: 84,
+    defaultPoints: 0,
     defaultPointSources: [
-      "no breakout fallback +4",
-      "ATR not above median fallback +3",
-      "taker not aligned fallback +1",
-      "unconditional +5",
+      "removed in P0 fix: no fallback or unconditional points remain",
     ],
     minimumTypicalLongScoreExample: {
-      score: 76,
-      components: "4H trend 25 + MACD 8 + ADX 6 + RelVol 9 + OI 4 + RANGE 5 + RSI 6 + defaults 13",
+      score: 63,
+      components: "4H trend 25 + MACD 8 + ADX 6 + RelVol 9 + OI 4 + RANGE 5 + RSI 6 + no defaults",
     },
     tautologicalRrGate: "TP1 is generated at 3.2R and then checked against a >=3R gate after costs.",
-    labelIssue: "Any directional structure breakout is labelled Breakout / retest without proving a retest.",
+    labelIssue: "Live label fixed to 'Breakout' (no retest claim); backtest strategy name kept for comparability.",
     probabilityWarning: "rankingScore is a heuristic rank, not an estimated win probability.",
   };
 }
